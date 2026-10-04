@@ -1,0 +1,122 @@
+#include <WiFi.h>
+#include <ThingSpeak.h>
+#include <ThingESP.h>
+
+ThingESP32 thing("sakib", "HomeAuto", "homeautoESP32");
+
+const char* ssid = "Hlw";
+const char* password = "1239";
+
+const char* thingSpeakAPIKey = "Z1NVKAIX7S0JI72B";
+const char* server = "api.thingspeak.com";
+WiFiClient client;
+
+const int soilSensorPin = 35; 
+const int trigPin = 5; 
+const int echoPin = 18; 
+const int relayPin = 2;   
+
+int soilMoistureValue;
+int moisturePercentage;
+
+long duration;
+float distanceCm;
+
+#define SOUND_SPEED 0.034
+
+void setup() {
+    Serial.begin(115200);
+
+    pinMode(trigPin, OUTPUT);
+    pinMode(echoPin, INPUT);
+    pinMode(relayPin, OUTPUT);
+
+    Serial.print("Connecting to Wi-Fi");
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWi-Fi connected.");
+
+    
+    ThingSpeak.begin(client);
+
+    
+    thing.SetWiFi(ssid, password);
+    thing.initDevice();
+}
+
+void loop() {
+
+    soilMoistureValue = analogRead(soilSensorPin); 
+    moisturePercentage = (100 - ((soilMoistureValue / 4095.00) * 100));
+
+    Serial.println("Soil Moisture: ");
+    Serial.print(moisturePercentage);
+    Serial.println("%");
+
+    
+    if (moisturePercentage < 20) {
+        digitalWrite(relayPin, HIGH); 
+        Serial.println("Soil is too dry. Water Pump Turned ON automatically.");
+    } else {
+        digitalWrite(relayPin, LOW); 
+        Serial.println("Soil moisture is sufficient. Water Pump Turned OFF automatically.");
+    }
+
+
+    digitalWrite(trigPin, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin, LOW);
+
+    duration = pulseIn(echoPin, HIGH);
+    distanceCm = duration * SOUND_SPEED / 2;
+
+    Serial.println("Distance: " + String(distanceCm) + " cm");
+
+
+    updateThingSpeak(moisturePercentage, distanceCm);
+
+    thing.Handle();
+
+    delay(3000); 
+}
+
+
+void updateThingSpeak(int soilMoisture, float distance) {
+    ThingSpeak.setField(1, soilMoisture);  
+    ThingSpeak.setField(2, distance);     
+
+    int response = ThingSpeak.writeFields(2787617, thingSpeakAPIKey);
+    if (response == 200) {
+        Serial.println("Data successfully sent to ThingSpeak.");
+    } else {
+        Serial.println("Error sending data to ThingSpeak. HTTP Response Code: " + String(response));
+    }
+}
+
+String HandleResponse(String query) {
+    if (query == "soil moisture") {
+        soilMoistureValue = analogRead(soilSensorPin);
+        moisturePercentage = (100 - ((soilMoistureValue / 4095.00) * 100));
+        return "Soil Moisture: " + String(moisturePercentage) + "%";
+    } else if (query == "distance") {
+        digitalWrite(trigPin, LOW);
+        delayMicroseconds(2);
+        digitalWrite(trigPin, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(trigPin, LOW);
+
+        duration = pulseIn(echoPin, HIGH);
+        distanceCm = duration * SOUND_SPEED / 2;
+        return "Distance: " + String(distanceCm) + " cm";
+    } else if (query == "pump status") {
+        bool pumpState = digitalRead(relayPin); 
+        return pumpState ? "Pump is ON" : "Pump is OFF";
+    } else {
+        return "Your query was invalid.";
+    }
+}
